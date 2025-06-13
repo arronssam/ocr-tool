@@ -3,118 +3,52 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
-  <title>OCR 이미지 텍스트 추출기</title>
-  <script src="https://unpkg.com/tesseract.js@v4.0.2/dist/tesseract.min.js"></script>
+  <title>OCR 텍스트 붙여넣기 자동 정리</title>
   <style>
-    body {
-      font-family: '맑은 고딕', sans-serif;
-      padding: 20px;
-      background: #f9f9f9;
-    }
-    #pasteArea {
-      width: 100%;
-      height: 300px;
-      border: 2px dashed #aaa;
-      display: none;
-      align-items: center;
-      justify-content: center;
-      text-align: center;
-      padding: 20px;
-      background: white;
-      cursor: pointer;
-    }
-    #output {
-      margin-top: 20px;
-      font-size: 1.2rem;
-      white-space: pre-wrap;
-      background: #fff;
-      padding: 15px;
-      border-radius: 8px;
-      border: 1px solid #ddd;
-      display: none;
-    }
-    button {
-      padding: 10px 20px;
-      font-size: 16px;
-      cursor: pointer;
-      margin-bottom: 15px;
-    }
+    body { font-family: '맑은 고딕', sans-serif; padding: 20px; background: #f9f9f9; }
+    textarea { width: 100%; height: 200px; font-size: 1.1rem; padding: 10px; }
+    button { padding: 10px 20px; margin-top: 10px; }
+    #output { white-space: pre-wrap; margin-top: 20px; background: #fff; padding: 15px; border: 1px solid #ccc; }
+    mark { background-color: #ffe066; font-weight: bold; }
   </style>
 </head>
 <body>
-  <button id="startBtn">문제 스캔</button>
-  <div id="pasteArea">이미지를 여기에 붙여넣기 (Ctrl + V)</div>
+  <h2>OCR 텍스트 붙여넣기 자동 정리 + 오타 교정</h2>
+  <textarea id="input" placeholder="OCR에서 추출된 텍스트를 여기에 붙여넣으세요."></textarea><br>
+  <button onclick="cleanAndCorrect()">자동 정리 및 오타 교정</button>
   <div id="output"></div>
+
   <script>
-    const startBtn = document.getElementById('startBtn');
-    const pasteArea = document.getElementById('pasteArea');
-    const output = document.getElementById('output');
+    function cleanAndCorrect() {
+      let text = document.getElementById('input').value;
 
-    function smartNormalizeAndClean(text) {
-      let result = text.replace(/[①-⑳]|\(\d+\)|\d{1,2}[.,)]/g, '')
-                       .replace(/\s+/g, '')
-                       .replace(/([가-힣])([^가-힣\s])/g, '$1 $2')
-                       .replace(/([^가-힣\s])([가-힣])/g, '$1 $2')
-                       .replace(/([가-힣]{1})([A-Z])/g, '$1 $2');
-      return result;
-    }
+      // 1. 기호 제거 및 정리
+      text = text.replace(/[=<>]/g, '');
+      text = text.replace(/([가-힣])([A-Z])/g, '$1 $2'); // 한글+영문 붙은 경우
+      text = text.replace(/([가-힣])([0-9])/g, '$1 $2'); // 한글+숫자 붙은 경우
+      text = text.replace(/([0-9])([가-힣])/g, '$1 $2'); // 숫자+한글 붙은 경우
+      text = text.replace(/([가-힣]{2,})(?=서비스|효과성|타당성|산출물)/g, '$1
+'); // 선택지 추정 줄바꿈
+      text = text.replace(/\s{2,}/g, ' ').trim();
 
-    function basicCorrectionWithHighlight(text) {
-      const rules = [
+      // 2. 오타 교정 및 강조
+      const corrections = [
         { wrong: /되였/g, correct: '되었' },
         { wrong: /기법도입/g, correct: '기법 도입' },
         { wrong: /과정에대한강조/g, correct: '과정에 대한 강조' },
         { wrong: /마케팅활성화/g, correct: '마케팅 활성화' },
-        { wrong: /즐시많은깃븐/g, correct: '옳지 않은 것' }
+        { wrong: /즐시많은깃븐/g, correct: '옳지 않은 것' },
+        { wrong: /서비스의질/g, correct: '서비스의 질' },
+        { wrong: /서비스의효과성/g, correct: '서비스의 효과성' },
+        { wrong: /투입과산출물/g, correct: '투입과 산출물' },
       ];
-      let corrected = text;
-      let found = false;
-      rules.forEach(rule => {
-        if (rule.wrong.test(corrected)) {
-          found = true;
-          corrected = corrected.replace(rule.wrong, '<mark>' + rule.correct + '</mark>');
-        }
+      let result = text;
+      corrections.forEach(rule => {
+        result = result.replace(rule.wrong, '<mark>' + rule.correct + '</mark>');
       });
-      if (!found) {
-        console.warn('⚠️ 감지된 오타 없음 (오타 검수)');
-      }
-      return corrected;
+
+      document.getElementById('output').innerHTML = result || '출력 결과가 없습니다.';
     }
-
-    function resetState() {
-      output.style.display = 'none';
-      output.innerHTML = '';
-      pasteArea.style.display = 'flex';
-      startBtn.style.display = 'none';
-    }
-
-    startBtn.onclick = () => {
-      pasteArea.style.display = 'flex';
-      startBtn.style.display = 'none';
-      pasteArea.focus();
-    };
-
-    pasteArea.addEventListener('paste', (event) => {
-      const items = (event.clipboardData || event.originalEvent.clipboardData).items;
-      for (let i = 0; i < items.length; i++) {
-        if (items[i].type.indexOf("image") === 0) {
-          const blob = items[i].getAsFile();
-          const reader = new FileReader();
-          reader.onload = function(e) {
-            Tesseract.recognize(e.target.result, 'kor', {
-              logger: m => console.log(m)
-            }).then(({ data: { text } }) => {
-              const cleaned = smartNormalizeAndClean(text);
-              const corrected = basicCorrectionWithHighlight(cleaned);
-              output.innerHTML = '<button onclick="resetState()">초기화</button><br><br>' + corrected;
-              output.style.display = 'block';
-              pasteArea.style.display = 'none';
-            });
-          };
-          reader.readAsDataURL(blob);
-        }
-      }
-    });
   </script>
 </body>
 </html>
